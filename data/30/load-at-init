@@ -12,6 +12,9 @@ tramp-adb
 secrets
 eudcb-bbdb
 eudcb-ldap
+eudcb-mailabbrev
+eudcb-complete
+eudcb-ecomplete
 tramp-archive
 wid-browse
 battery

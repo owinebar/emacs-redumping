@@ -1,4 +1,15 @@
 reftex
+reftex-ref
+reftex-parse
+reftex-cite
+refbib
+reftex-sel
+reftex-dcr
+reftex-toc
+reftex-index
+refex-global
+reftex-auc
+ox-org
 css-mode
 less-css-mode
 mhtml-mode
@@ -10,4 +21,17 @@ semantic/wisent/python
 srecode/map
 srecode/find
 srecode/mode
+html-ts-mode
+toml-ts-mode
+yaml-ts-mode
+c-ts-mode
+typescript-ts-mode
+cmake-ts-mode
+c-ts-common
+json-ts-mode
+rust-ts-mode
+dockerfile-ts-mode
+go-ts-mode
+java-ts-mode
+ruby-ts-mode
 
