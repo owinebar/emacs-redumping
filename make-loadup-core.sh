@@ -3,16 +3,30 @@
 EMACS="${EMACS:-emacs}"
 LISP_DIR="$($EMACS -Q -batch -l lisp-directory.el)"
 LISP_DIR="${LISP_DIR%/}"
-PLATFORM="$(EMACS -Q -batch -l platform.el)"
-EMACS_VERSION="$($EMACS -Q --eval '(princ emacs-version)')"
-EMACS_MAJOR="$($EMACS -Q --eval '(princ emacs-major-version)')"
+PLATFORM="$($EMACS -Q -batch -l platform.el)"
+EMACS_VERSION="$($EMACS -Q -batch --eval '(princ emacs-version)')"
+EMACS_MAJOR="$($EMACS -Q -batch --eval '(princ emacs-major-version)')"
 REDUMP_EL="${REDUMP_EL:-redump-loadup-core-${EMACS_VERSION}.el}"
 
-tmpdir="$(mktemp -d)"
-cleanup () {
-    rm -Rf "$tmpdir"
+#tmpdir="$(mktemp -d)"
+tmpdir="$(realpath tmp)"
+cleanup() {
+    #    rm -Rf "$tmpdir"
+    :
+}
+
+on_error() {
+    local i=0
+    local estr="$(caller $i)"
+    echo "Error"
+    while [ "$estr" ]; do
+	echo "$estr"
+	(( ++i , 1 ))
+	estr="$(caller $i)"
+    done
 }
 trap cleanup EXIT
+trap on_error ERR
 
 startdir="$(pwd)"
 data_dir="$(realpath "data/$EMACS_MAJOR")"
@@ -78,11 +92,12 @@ if [ -z "$exclusions" ] ; then
     exclusions="$tmpdir/exclusions"
     : >"$exclusions"
 fi
+
 ${EMACS} -batch -Q -l print-load-history.el |
     sed -E -e "s#^${LISP_DIR}/(.*)\\.elc?\$#\\1#" \
 	>"$baseline_libs"
 
-provide_features="$(mktemp -p "$tmpdir")"
+provide_features="$tmpdir/provide-features.el"
 
 sed -E -e "s/^(.*)\$/(provide '\\1)/" \
     <"$load_at_init" \
@@ -110,8 +125,8 @@ fi
 sed -E -e "s/^(.*)\$/(provide '\\1)/" \
     <"$user_load_at_init" \
     >>"$provide_features"
-all_load_at_init="$(mktemp -p "$tmpdir")"
-cat "$load_at_init" "$user_load_at_init" "dump_fails" | sort -u >"$all_load_at_init"
+all_load_at_init="$tmpdir/all-load-at-init"
+cat "$load_at_init" "$user_load_at_init" "$dump_fails" | sort -u >"$all_load_at_init"
 cat "$user_load_at_init" | while read lib; do
     grep -qF "$lib" "$load_at_init" "$exclusions" && continue
     echo "$lib" >>"$nodelay_load_at_init"
@@ -121,14 +136,14 @@ cat "$load_at_init" | while read lib; do
     echo "$lib" >>"$delay_load_at_init"
 done
 
-elc_sed='t clear; : clear; s#^.*/cedet/(.*)\.elc$#\1# t; s#^.*/([^/]+)\.elc$#\1#'
+elc_sed='t clear; : clear; s#^.*/cedet/(.*)\.elc$#\1#; t; s#^.*/([^/]+)\.elc$#\1#'
 is_undumpable() {
     # These are undumpable regardless of major version or platform
     grep -Eq '(^\./(term|obsolete))|(viper)' <<<"$1"
 }
 
 is_excluded() {
-    grep -qF "$y" \
+    grep -qF "$1" \
 	 "$baseline_libs" \
 	 "$incompatible" \
 	 "$all_load_at_init" \
@@ -136,7 +151,7 @@ is_excluded() {
 }
 
 if [ -z "$specified" ]; then
-    specified="$tmpdir/dumpable-core-libs"
+    specified="$(realpath $tmpdir/dumpable-core-libs)"
     (
 	cd "$LISP_DIR"
 	find -name '*.elc' |
@@ -152,43 +167,47 @@ if [ -z "$specified" ]; then
     )
 fi
 load_specified="$tmpdir/load-specified.el"
-sed -E -e 's/^(.*)$/(load "\1")/' >"$load_specified"
+sed -E -e 's/^(.*)$/(load "\1")/' <"$specified" >"$load_specified"
 
 clean_load_history="$tmpdir/clean-load-history.sed"
 cat >"$clean_load_history" <<EOF
 s#^${LISP_DIR}/(.*)\\.elc?\$#\\1#
-/${load_specified}/ d
+\@${load_specified}@ d
 EOF
 
 : >"${REDUMP_EL}"
 if [ -e "$exec_preload" ]; then
     cat "$exec_preload" >>"${REDUMP_EL}"
-    echo "" >"${REDUMP_EL}"
+    echo "" >>"${REDUMP_EL}"
 fi    
 cat "$provide_features" >>"${REDUMP_EL}"
-echo "" >"${REDUMP_EL}"
+echo "" >>"${REDUMP_EL}"
 ${EMACS} -batch -Q \
 	   -l "$load_specified" \
 	   -l print-load-history.el |
     sed -E -f "$clean_load_history" |
     (while read lib; do
 	 if ! is_excluded "$lib"; then
-	     echo "$lib";
-	 fi;
+	     echo "$lib"
+	 else
+	     echo "excluded $lib" >&2
+	 fi
      done) |
     sed -E -e 's/^(.*)$/(load "\1")/' >>"${REDUMP_EL}"
 
 ## Shell script mode does not deal well with lisp quotes even embedded in strings
 clean_feature_text() {
     cat "$1" | while read lib; do
-	echo "${2}(setq features (delete (quote $lib) features))"
+	printf "%s(setq features (delete (quote %s) features))\n" "${2}" "$lib"
     done
 }
+
 require_feature_text() {
     cat "$1" | while read lib; do
-	echo "${2}(require (quote $lib))"
+	printf "%s(require (quote %s))\n" "${2}" "$lib"
     done
 }
+
 cat >>"${REDUMP_EL}" <<EOF
 (add-hook
  (quote before-init-hook)
@@ -197,15 +216,15 @@ cat >>"${REDUMP_EL}" <<EOF
    (menu-bar-mode)
    (global-font-lock-mode)
    (setq features (delete (quote dbus) features))
-$(clean_feature_text "$nodelay_load_at_init" "    ")
+$(clean_feature_text "$nodelay_load_at_init" "   ")
    (require (quote dbus))))
 
 (add-hook
  (quote after-init-hook)
  (lambda ()
-$(clean_feature_text "$delay_load_at_init" "    ")
-$(require_feature_text "$delay_load_at_init" "    ")
-$(require_feature_text "$nodelay_load_at_init" "    ")
+$(clean_feature_text "$delay_load_at_init" "   ")
+$(require_feature_text "$delay_load_at_init" "   ")
+$(require_feature_text "$nodelay_load_at_init" "   ")
    ))
 
 EOF
