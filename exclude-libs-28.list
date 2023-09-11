@@ -97,3 +97,4 @@ helm-git
 company-coq
 flymake-perlcritic(-.*)?
 csharp-tree-sitter(-.*)?
+rudel(-.*)?
